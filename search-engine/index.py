@@ -10,13 +10,16 @@ import sys
 import shutil                   # to remove directory trees
 import traceback
 import urllib                   # for quote and unquote
+
 def write_tuples(outfile, tuples):
     for item in tuples:
         line = ' '.join(urllib.quote(str(field)) for field in item)
         outfile.write(line + "\n")
+
 def read_tuples(infile):
     for line in infile:
         yield tuple(urllib.unquote(field) for field in line.split())
+
 # XXX maybe these functions don't need to exist?
 def read_metadata(index_path):
     with path['documents'].open() as metadata_file:
@@ -27,10 +30,12 @@ def read_metadata(index_path):
 def file_unchanged(metadatas, path):
     return any(metadata.get(path.name) == get_metadata(path)
                for metadata in metadatas)
+
 def doc_ids(index_path, terms):
     "Actually evaluate a query."
     doc_id_sets = (set(term_doc_ids(index_path, term)) for term in terms)
     return set.intersection(*doc_id_sets)
+
 def term_doc_ids(index_path, term):
     doc_id_sets = (segment_term_doc_ids(segment, term)
                    for segment in index_segments(index_path))
@@ -39,6 +44,7 @@ def term_doc_ids(index_path, term):
 # XXX make this a method of the Index object, perhaps returning Segment objects
 def index_segments(index_path):
     return [path for path in index_path if path.basename().startswith('seg_')]
+
 class Path:                     # like java.lang.File
     def __init__(self, name):
         self.name = name
@@ -50,6 +56,7 @@ class Path:                     # like java.lang.File
     basename     = lambda self: os.path.basename(self.name)
     parent       = lambda self: Path(os.path.dirname(self.name))
     abspath      = lambda self: os.path.abspath(self.name)
+
 def segment_term_doc_ids(segment, needle_term):
     for chunk_name in segment_term_chunks(segment, needle_term):
         with segment[chunk_name].open_gzipped() as chunk_file:
@@ -59,6 +66,7 @@ def segment_term_doc_ids(segment, needle_term):
                 # Once we reach an alphabetically later term, we're done:
                 if haystack_term > needle_term:
                     break
+
 # XXX maybe return Path objects?
 def segment_term_chunks(segment, term):
     previous_chunk = None
@@ -73,9 +81,11 @@ def segment_term_chunks(segment, term):
     else:                   # executed if we don't break
         if previous_chunk is not None:
             yield previous_chunk
+
 def skip_file_entries(segment_path):
     with segment_path['skip'].open() as skip_file:
         return list(read_tuples(skip_file))
+
 def get_metadata(path):
     s = os.stat(path.name)
     return int(s.st_mtime), int(s.st_size)
@@ -85,11 +95,13 @@ def search_ui(index_path, terms):
         for path in sorted(paths(index_path, terms),
                            key=get_metadata, reverse=True):
             print(path.name)
+
 # At the moment, our doc_ids are just pathnames; this converts them to Path objects.
 def paths(index_path, terms):
     parent = index_path.parent()
     for doc_id in doc_ids(index_path, terms):
         yield Path(os.path.relpath(parent[doc_id].abspath(), start='.'))
+
 # 2**20 is chosen as the maximum segment size because that uses
 # typically about a quarter gig, which is a reasonable size these
 # days.
@@ -118,6 +130,7 @@ def build_index(index_path, corpus_path, postings_filters):
         write_new_segment(index_path['seg_%s' % ii], sorted(chunk))
 
     merge_segments(index_path, index_segments(index_path))
+
 # From nikipore on Stack Overflow <http://stackoverflow.com/a/19264525>
 def blocked(seq, block_size):
     seq = iter(seq)
@@ -130,6 +143,7 @@ def blocked(seq, block_size):
             yield block
         else:
             raise StopIteration
+
 def find_documents(path):
     for dir_name, _, filenames in os.walk(path.name):
         dir_path = Path(dir_name)
@@ -162,6 +176,7 @@ def remove_duplicates(seq):
             yield item
             seen_items.add(item)
 chunk_size = 4096
+
 def write_new_segment(path, postings):
     os.mkdir(path.name)
     chunks = blocked(postings, chunk_size)
@@ -171,11 +186,13 @@ def write_new_segment(path, postings):
         write_tuples(skip_file, itertools.chain(*skip_file_contents))
 
 # Yields one skip file entry, or, in the edge case of an empty chunk, none.
+
 def write_chunk(path, filename, chunk):
     with path[filename].open_gzipped('w') as chunk_file:
         write_tuples(chunk_file, chunk)
     if chunk:
         yield chunk[0][0], filename
+
 # Crude approximation of HTML tokenization.  Note that for proper
 # excerpt generation (as in the "grep" command) the postings generated
 # need to contain position information, because we need to run this
@@ -201,6 +218,7 @@ def tokenize_html(file_path):
                     line = tag_start_re.sub('', line)
                 for term in word_re.findall(line):
                     yield term, file_path.name
+
 def merge_segments(path, segments):
     if len(segments) == 1:
         return
@@ -211,27 +229,33 @@ def merge_segments(path, segments):
 
     for segment in segments:
         shutil.rmtree(segment.name)
+
 def read_segment(path):
     for _, chunk in skip_file_entries(path):
         # XXX refactor chunk reading?  We open_gzipped in three places now.
         with path[chunk].open_gzipped() as chunk_file:
             for item in read_tuples(chunk_file):
                 yield item
+
 def make_stopwords_filter(stopwords):
     stopwords = set(stopwords)
     stopwords |= ( set(word.upper()      for word in stopwords) 
                  | set(word.capitalize() for word in stopwords))
     return lambda postings: ((term, doc_id) for term, doc_id in postings
                              if term not in stopwords)
+
 word_len = 20                   # to eliminate nonsense words
+
 def discard_long_nonsense_words_filter(postings):
     """Drop postings for nonsense words."""
     return ((term, doc_id) for term, doc_id in postings if len(term) < word_len)
+
 def case_insensitive_filter(postings):
     for term, doc_id in postings:
         yield term, doc_id
         if term.lower() != term:
             yield term.lower(), doc_id
+
 def grep(index_path, terms):
     for path in paths(index_path, terms):
         try:
@@ -241,6 +265,7 @@ def grep(index_path, terms):
                         sys.stdout.write("%s:%s:%s" % (path.name, ii, line))
         except Exception:          # The file might e.g. no longer exist.
             traceback.print_exc()
+
 def main(argv):
     # Eliminate the most common English words from queries and indices.
     stopwords = 'the of and to a in it is was that i for on you he be'.split()
